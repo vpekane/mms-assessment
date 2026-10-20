@@ -1,0 +1,11 @@
+name: weighbridge_tickets
+version: "1.0"
+
+fields:
+  ticket_id:
+    type: string
+    required: true
+
+  gross_weight:
+    type: number
+    required: true
