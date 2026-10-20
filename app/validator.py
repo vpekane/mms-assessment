@@ -12,6 +12,7 @@ def add_issue(issues, row, field, code, message):
         "message": message,
     })
 
+
 def validate_headers(headers, contract, issues):
     """Check that the CSV containd headers a contract expected coloumns"""
 
@@ -35,6 +36,7 @@ def validate_headers(headers, contract, issues):
             code="UNEXPECTED_COLUMN",
             message=f"Column '{field}' is not defined in the contract"
         )
+
 
 def validate_field_value(value, field_name, rules, row, issues):
     """Validate one field value against its contract definition."""
@@ -127,6 +129,7 @@ def validate_unique_values(records, contract, issues):
             else:
                 seen.add(value)
 
+
 def validate_cross_field_rules(records, contract, issues):
     """Apply supported cross-field consistency rules."""
 
@@ -162,6 +165,7 @@ def validate_cross_field_rules(records, contract, issues):
                         f"({expected}), but got {result_value}"
                     ),
                 )
+
 
 def validate_csv(csv_path, contract):
     """Validate a CSV file against a loaded contract."""
