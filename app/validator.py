@@ -2,6 +2,7 @@ import csv
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from math import isfinite
 
 
 def add_issue(issues, row, field, code, message):
@@ -61,13 +62,23 @@ def validate_field_value(value, field_name, rules, row, issues):
     if field_type == "number":
         try:
             number = float(value)
-        except ValueError:
+        except (ValueError, OverflowError):
             add_issue(
                 issues,
                 row,
                 field_name,
                 "INVALID_NUMBER",
                 f"'{field_name}' must be numeric",
+            )
+            return
+
+        if not isfinite(number):
+            add_issue(
+                issues,
+                row,
+                field_name,
+                "INVALID_NUMBER",
+                f"'{field_name}' must be a finite number",
             )
             return
 
@@ -148,8 +159,15 @@ def validate_cross_field_rules(records, contract, issues):
                 left_value = float(record[left])
                 subtract_value = float(record[subtract])
                 result_value = float(record[result])
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, OverflowError):
                 # Individual field checks report missing or invalid values.
+                continue
+
+            if not all(
+                isfinite(value)
+                for value in (left_value, subtract_value, result_value)
+            ):
+                # Field validation already reports non-finite numeric values.
                 continue
 
             expected = left_value - subtract_value

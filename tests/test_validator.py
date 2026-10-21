@@ -1,6 +1,8 @@
 import csv
 import pytest
+
 from app.validator import validate_csv
+from app.contracts import load_contract
 
 
 def write_csv(path, headers, rows):
@@ -171,3 +173,39 @@ def test_missing_csv_raises_error(tmp_path):
         pass
     else:
         raise AssertionError("Expected FileNotFoundError")
+
+
+@pytest.mark.parametrize(
+    "gross_weight",
+    [
+        "NaN",
+        "nan",
+        "Infinity",
+        "-Infinity",
+        "1e309",
+    ],
+)
+def test_validate_csv_rejects_non_finite_numbers(
+    tmp_path,
+    gross_weight,
+):
+    csv_path = tmp_path / "non_finite_weight.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        f"T-001,{gross_weight},5000,10000,2026-10-20T08:30:00\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    issue_codes = {
+        issue["code"]
+        for issue in report["issues"]
+    }
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert "INVALID_NUMBER" in issue_codes
+    assert "WEIGHT_MISMATCH" not in issue_codes
