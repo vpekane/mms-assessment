@@ -40,6 +40,50 @@ def validate_headers(headers, contract, issues):
         )
 
 
+def validate_record_width(records, headers, issues):
+    """Check that every CSV record has the expected number of values."""
+
+    expected_width = len(headers)
+
+    for row_number, record in enumerate(records, start=2):
+        extra_values = record.get(None)
+
+        if extra_values:
+            actual_width = expected_width + len(extra_values)
+
+            add_issue(
+                issues,
+                row=row_number,
+                field=None,
+                code="ROW_LENGTH_MISMATCH",
+                message=(
+                    f"Row contains {actual_width} values, "
+                    f"but the header defines {expected_width} columns"
+                ),
+            )
+            continue
+
+        missing_values = [
+            header
+            for header in headers
+            if record.get(header) is None
+        ]
+
+        if missing_values:
+            actual_width = expected_width - len(missing_values)
+
+            add_issue(
+                issues,
+                row=row_number,
+                field=None,
+                code="ROW_LENGTH_MISMATCH",
+                message=(
+                    f"Row contains {actual_width} values, "
+                    f"but the header defines {expected_width} columns"
+                ),
+            )
+
+
 def validate_field_value(value, field_name, rules, row, issues):
     """Validate one field value against its contract definition."""
 
@@ -222,6 +266,8 @@ def validate_csv(csv_path, contract):
 
 
         records = list(reader)
+
+        validate_record_width(records, headers, issues)
 
     # A missing contract column means the associated checks cannot run.
     available_fields = set(headers)

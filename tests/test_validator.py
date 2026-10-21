@@ -209,3 +209,62 @@ def test_validate_csv_rejects_non_finite_numbers(
     assert report["invalid_records"] == 1
     assert "INVALID_NUMBER" in issue_codes
     assert "WEIGHT_MISMATCH" not in issue_codes
+
+
+def test_validate_csv_detects_extra_row_values(tmp_path):
+    csv_path = tmp_path / "extra_values.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        "T-001,15000,5000,10000,2026-10-20T08:30:00,EXTRA\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    row_issues = [
+        issue
+        for issue in report["issues"]
+        if issue["code"] == "ROW_LENGTH_MISMATCH"
+    ]
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert len(row_issues) == 1
+    assert row_issues[0]["row"] == 2
+    assert "6 values" in row_issues[0]["message"]
+    assert "5 columns" in row_issues[0]["message"]
+
+
+def test_validate_csv_detects_missing_row_values(tmp_path):
+    csv_path = tmp_path / "missing_values.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        "T-001,15000,5000,10000\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    row_issues = [
+        issue
+        for issue in report["issues"]
+        if issue["code"] == "ROW_LENGTH_MISMATCH"
+    ]
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert len(row_issues) == 1
+    assert row_issues[0]["row"] == 2
+    assert "4 values" in row_issues[0]["message"]
+    assert "5 columns" in row_issues[0]["message"]
+
+    issue_codes = {
+        issue["code"]
+        for issue in report["issues"]
+    }
+
+    assert "REQUIRED" in issue_codes
