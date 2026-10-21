@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -185,7 +186,22 @@ def validate_csv(csv_path, contract):
         if not headers:
             raise ValueError("CSV file is empty or has no header row")
 
+        header_counts = Counter(headers)
+
+        duplicate_headers = sorted(
+            header
+            for header, count in header_counts.items()
+            if count > 1
+        )
+
+        if duplicate_headers:
+            raise ValueError(
+                "CSV contains duplicate column names: "
+                + ", ".join(duplicate_headers)
+            )
+
         validate_headers(headers, contract, issues)
+
 
         records = list(reader)
 
