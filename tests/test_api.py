@@ -1,8 +1,20 @@
 from io import BytesIO
 import yaml
+import pytest
 
 from app import create_app
-from app.contracts import CONTRACTS_DIR
+import app.drift_detection as drift
+
+from app import create_app
+
+
+@pytest.fixture
+def client():
+    app = create_app()
+    app.config["TESTING"] = True
+
+    with app.test_client() as test_client:
+        yield test_client
 
 
 def write_test_contract(directory):
@@ -122,3 +134,78 @@ def test_validate_endpoint_rejects_missing_contract():
     )
 
     assert response.status_code == 404
+
+
+def test_detect_drift_returns_report(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
+
+    drift.save_baseline("weighbridge", {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    })
+
+    response = client.post(
+        "/detect-drift",
+        data={
+            "dataset_name": "weighbridge",
+            "file": (
+                BytesIO(
+                    b"ticket_id,gross_weight\n"
+                    b"T-001,not-a-number\n"
+                ),
+                "incoming.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+
+    report = response.get_json()
+
+    assert report["dataset_name"] == "weighbridge"
+    assert report["has_drift"] is True
+    assert report["findings"][0]["code"] == "TYPE_CHANGED"
+    assert report["findings"][0]["field"] == "gross_weight"
+
+
+def test_detect_drift_requires_dataset_name(client):
+    response = client.post(
+        "/detect-drift",
+        data={
+            "file": (
+                BytesIO(b"ticket_id\nT-001\n"),
+                "incoming.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == (
+        "The 'dataset_name' field is required."
+    )
+
+
+def test_detect_drift_returns_404_for_missing_baseline(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
+
+    response = client.post(
+        "/detect-drift",
+        data={
+            "dataset_name": "unknown_dataset",
+            "file": (
+                BytesIO(b"ticket_id\nT-001\n"),
+                "incoming.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == (
+        "Baseline for 'unknown_dataset' was not found"
+    )
+

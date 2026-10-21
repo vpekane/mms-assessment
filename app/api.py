@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 
 from app.contracts import load_contract
 from app.validator import validate_csv
+from app.drift_detection import detect_schema_drift
 
 
 api_bp = Blueprint("api", __name__)
@@ -48,6 +49,42 @@ def validate_dataset():
         return jsonify({
             "error": "The uploaded CSV could not be processed",
             "details": str(exc)
+        }), 400
+
+    return jsonify(report), 200
+
+
+@api_bp.route("/detect-drift", methods=["POST"])
+def detect_drift():
+    uploaded_file = request.files.get("file")
+    dataset_name = request.form.get("dataset_name", "").strip()
+
+    if uploaded_file is None or not uploaded_file.filename:
+        return jsonify({
+            "error": "A CSV file is required in the 'file' field."
+        }), 400
+
+    if not dataset_name:
+        return jsonify({
+            "error": "The 'dataset_name' field is required."
+        }), 400
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "uploaded.csv"
+            uploaded_file.save(csv_path)
+
+            report = detect_schema_drift(csv_path, dataset_name)
+
+    except FileNotFoundError:
+        return jsonify({
+            "error": f"Baseline for '{dataset_name}' was not found"
+        }), 404
+
+    except ValueError as exc:
+        return jsonify({
+            "error": "The uploaded CSV could not be processed",
+            "details": str(exc),
         }), 400
 
     return jsonify(report), 200
