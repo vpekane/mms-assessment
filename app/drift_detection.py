@@ -1,6 +1,48 @@
 import csv
+import json
 from datetime import datetime
 from pathlib import Path
+
+
+BASELINES_DIR = Path(__file__).resolve().parent.parent / "baselines"
+
+
+def save_baseline(dataset_name, schema):
+    """Save an accepted schema as a JSON baseline."""
+
+    if not dataset_name or Path(dataset_name).name != dataset_name:
+        raise ValueError("Invalid dataset name")
+
+    BASELINES_DIR.mkdir(parents=True, exist_ok=True)
+
+    baseline_path = BASELINES_DIR / f"{dataset_name}.json"
+
+    with baseline_path.open("w", encoding="utf-8") as file:
+        json.dump(schema, file, indent=2, sort_keys=True)
+
+    return baseline_path
+
+
+def load_baseline(dataset_name):
+    """Load a previously saved schema baseline."""
+
+    if not dataset_name or Path(dataset_name).name != dataset_name:
+        raise ValueError("Invalid dataset name")
+
+    baseline_path = BASELINES_DIR / f"{dataset_name}.json"
+
+    if not baseline_path.is_file():
+        raise FileNotFoundError(
+            f"Baseline for '{dataset_name}' was not found"
+        )
+
+    with baseline_path.open("r", encoding="utf-8") as file:
+        baseline = json.load(file)
+
+    if not isinstance(baseline, dict):
+        raise ValueError("Baseline must contain a JSON object")
+
+    return baseline
 
 
 def infer_type(value) -> None:

@@ -1,5 +1,7 @@
+import json
 import pytest
 from app.drift_detection import infer_type, inspect_csv_schema
+import app.drift_detection as drift
 
 
 def test_infer_type_is_correct_for_all_types():
@@ -66,8 +68,6 @@ def test_inspect_csv_detects_empty_column(tmp_path):
 def test_csv_inspection_fails_because_file_not_found(tmp_path):
     csv_path = tmp_path / ""
 
-    # schema = inspect_csv_schema(csv_path)
-
     # assert schema
     with pytest.raises(FileNotFoundError, match="CSV file not found"):
         inspect_csv_schema(csv_path)
@@ -82,3 +82,51 @@ def test_csv_inspection_catches_invalid_csv(tmp_path):
 
     with pytest.raises(ValueError, match="CSV file is empty"):
         inspect_csv_schema(csv_path)
+
+
+def test_save_baseline_creates_json_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
+
+    schema = {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    }
+
+    baseline_path = drift.save_baseline("weighbridge", schema)
+
+    assert baseline_path.is_file()
+
+    saved_schema = json.loads(
+        baseline_path.read_text(encoding="utf-8")
+    )
+
+    assert saved_schema == schema
+
+
+def test_load_baseline_returns_saved_schema(tmp_path, monkeypatch):
+    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
+
+    schema = {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    }
+
+    drift.save_baseline("weighbridge", schema)
+
+    loaded_schema = drift.load_baseline("weighbridge")
+
+    assert loaded_schema == schema
+
+
+def test_load_baseline_fails_when_baseline_does_not_exist(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="was not found"):
+        drift.load_baseline("unknown_dataset")
+
+
+def test_save_baseline_rejects_invalid_dataset_name():
+    with pytest.raises(ValueError, match="Invalid dataset name"):
+        drift.save_baseline("../outside", {"ticket_id": "string"})
