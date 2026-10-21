@@ -5,7 +5,6 @@ from flask import Blueprint, jsonify, request
 
 from app.contracts import load_contract
 from app.validator import validate_csv
-# from app.drift_detection import detect_schema_drift
 
 
 api_bp = Blueprint("api", __name__)
