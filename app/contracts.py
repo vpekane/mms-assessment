@@ -22,10 +22,11 @@ def validate_contract(contract: dict) -> None:
     if not contract["fields"]:
         raise ValueError("Contract must define at least one field")
 
+
 def load_contract(contract_name: str) -> dict:
     """Load a YAML contract and validate its structure"""
 
-    contract_path = CONTRACTS_DIR / f"{contract_name}"
+    contract_path = CONTRACTS_DIR / f"{contract_name}.yaml"
 
     try:
         with contract_path.open('r', encoding="utf-8") as file:
@@ -39,9 +40,6 @@ def load_contract(contract_name: str) -> dict:
         raise ValueError(f"Contract file '{contract_name}.yaml' contains invalid YAML"
                          ) from exc
 
-    validate_contract(contract_name)
+    validate_contract(contract)
 
     return contract
-
-
-# print(load_contract('weighbridge.yaml'))

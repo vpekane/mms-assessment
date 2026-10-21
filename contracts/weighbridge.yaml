@@ -5,7 +5,31 @@ fields:
   ticket_id:
     type: string
     required: true
+    unique: true
 
   gross_weight:
     type: number
     required: true
+    minimum: 0
+
+  tare_weight:
+    type: number
+    required: true
+    minimum: 0
+
+  net_weight:
+    type: number
+    required: true
+    minimum: 0
+
+  timestamp:
+    type: datetime
+    required: true
+
+rules:
+  - name: net_weight_consistency
+    type: difference_equals
+    left: gross_weight
+    subtract: tare_weight
+    result: net_weight
+    tolerance: 0
