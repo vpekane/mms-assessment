@@ -239,3 +239,73 @@ def test_compare_schemas_does_not_report_type_change_for_unknown():
     assert report["has_drift"] is False
     assert report["findings"] == []
 
+def test_detect_schema_drift_no_changes(tmp_path, monkeypatch):
+    baseline_dir = tmp_path / "baselines"
+    monkeypatch.setattr(drift, "BASELINES_DIR", baseline_dir)
+
+    drift.save_baseline("weighbridge", {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    })
+
+    csv_path = tmp_path / "incoming.csv"
+    csv_path.write_text(
+        "ticket_id,gross_weight\n"
+        "T-001,1200.5\n"
+        "T-002,1350.0\n",
+        encoding="utf-8",
+    )
+
+    report = drift.detect_schema_drift(csv_path, "weighbridge")
+
+    assert report["dataset_name"] == "weighbridge"
+    assert report["has_drift"] is False
+    assert report["findings"] == []
+
+
+def test_detect_schema_drift_detects_type_change(tmp_path, monkeypatch):
+    baseline_dir = tmp_path / "baselines"
+    monkeypatch.setattr(drift, "BASELINES_DIR", baseline_dir)
+
+    drift.save_baseline("weighbridge", {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    })
+
+    csv_path = tmp_path / "incoming.csv"
+    csv_path.write_text(
+        "ticket_id,gross_weight\n"
+        "T-001,not-a-number\n"
+        "T-002,also-not-a-number\n",
+        encoding="utf-8",
+    )
+
+    report = drift.detect_schema_drift(csv_path, "weighbridge")
+
+    assert report["has_drift"] is True
+    assert report["findings"][0]["code"] == "TYPE_CHANGED"
+    assert report["findings"][0]["field"] == "gross_weight"
+    assert report["findings"][0]["expected"] == "number"
+    assert report["findings"][0]["actual"] == "string"
+
+
+def test_detect_schema_drift_fails_when_baseline_is_missing(
+    tmp_path, monkeypatch
+):
+    baseline_dir = tmp_path / "baselines"
+    monkeypatch.setattr(drift, "BASELINES_DIR", baseline_dir)
+
+    csv_path = tmp_path / "incoming.csv"
+    csv_path.write_text(
+        "ticket_id,gross_weight\n"
+        "T-001,1200.5\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Baseline for 'weighbridge' was not found",
+    ):
+        drift.detect_schema_drift(csv_path, "weighbridge")
+
+

@@ -45,70 +45,6 @@ def load_baseline(dataset_name):
     return baseline
 
 
-def compare_schemas(baseline, current_schema):
-    """Compare a saved schema against a newly observed schema."""
-
-    findings = []
-
-    baseline_fields = set(baseline)
-    current_fields = set(current_schema)
-
-    # Detect columns that have been added.
-    for field in sorted(current_fields - baseline_fields):
-        findings.append({
-            "code": "ADDED_COLUMN",
-            "field": field,
-            "expected": None,
-            "actual": current_schema[field],
-            "message": f"Column '{field}' was added",
-        })
-
-    # Detect columns that have been removed.
-    for field in sorted(baseline_fields - current_fields):
-        findings.append({
-            "code": "REMOVED_COLUMN",
-            "field": field,
-            "expected": baseline[field],
-            "actual": None,
-            "message": f"Column '{field}' was removed",
-        })
-
-    # Compare types for columns present in both schemas.
-    shared_fields = baseline_fields & current_fields
-
-    for field in sorted(shared_fields):
-        expected_type = baseline[field]
-        actual_type = current_schema[field]
-
-        if actual_type == "mixed":
-            findings.append({
-                "code": "MIXED_TYPE",
-                "field": field,
-                "expected": expected_type,
-                "actual": actual_type,
-                "message": (
-                    f"Column '{field}' contains inconsistent data types"
-                ),
-            })
-
-        elif actual_type != "unknown" and actual_type != expected_type:
-            findings.append({
-                "code": "TYPE_CHANGED",
-                "field": field,
-                "expected": expected_type,
-                "actual": actual_type,
-                "message": (
-                    f"Column '{field}' changed type from "
-                    f"'{expected_type}' to '{actual_type}'"
-                ),
-            })
-
-    return {
-        "has_drift": bool(findings),
-        "findings": findings,
-    }
-
-
 def infer_type(value) -> None:
     """Infer the likely data type of a non-empty CSV value."""
 
@@ -183,3 +119,83 @@ def inspect_csv_schema(csv_path: str) -> dict:
             schema[header] = "mixed"
 
     return schema
+
+
+def compare_schemas(baseline, current_schema):
+    """Compare a saved schema against a newly observed schema."""
+
+    findings = []
+
+    baseline_fields = set(baseline)
+    current_fields = set(current_schema)
+
+    # Detect columns that have been added.
+    for field in sorted(current_fields - baseline_fields):
+        findings.append({
+            "code": "ADDED_COLUMN",
+            "field": field,
+            "expected": None,
+            "actual": current_schema[field],
+            "message": f"Column '{field}' was added",
+        })
+
+    # Detect columns that have been removed.
+    for field in sorted(baseline_fields - current_fields):
+        findings.append({
+            "code": "REMOVED_COLUMN",
+            "field": field,
+            "expected": baseline[field],
+            "actual": None,
+            "message": f"Column '{field}' was removed",
+        })
+
+    # Compare types for columns present in both schemas.
+    shared_fields = baseline_fields & current_fields
+
+    for field in sorted(shared_fields):
+        expected_type = baseline[field]
+        actual_type = current_schema[field]
+
+        if actual_type == "mixed":
+            findings.append({
+                "code": "MIXED_TYPE",
+                "field": field,
+                "expected": expected_type,
+                "actual": actual_type,
+                "message": (
+                    f"Column '{field}' contains inconsistent data types"
+                ),
+            })
+
+        elif actual_type != "unknown" and actual_type != expected_type:
+            findings.append({
+                "code": "TYPE_CHANGED",
+                "field": field,
+                "expected": expected_type,
+                "actual": actual_type,
+                "message": (
+                    f"Column '{field}' changed type from "
+                    f"'{expected_type}' to '{actual_type}'"
+                ),
+            })
+
+    return {
+        "has_drift": bool(findings),
+        "findings": findings,
+    }
+
+
+def detect_schema_drift(csv_path, dataset_name):
+    """Inspect a CSV and compare its schema with a saved baseline"""
+
+    current_schema = inspect_csv_schema(csv_path)
+
+    baseline = load_baseline(dataset_name)
+
+    comparison = compare_schemas(baseline, current_schema)
+
+    return {
+        "dataset_name": dataset_name,
+        "has_drift": comparison["has_drift"],
+        "findings": comparison["findings"],
+    }
