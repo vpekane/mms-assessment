@@ -1,6 +1,6 @@
 import json
 import pytest
-from app.drift_detection import infer_type, inspect_csv_schema
+from app.drift_detection import infer_type, inspect_csv_schema, compare_schemas
 import app.drift_detection as drift
 
 
@@ -130,3 +130,112 @@ def test_load_baseline_fails_when_baseline_does_not_exist(
 def test_save_baseline_rejects_invalid_dataset_name():
     with pytest.raises(ValueError, match="Invalid dataset name"):
         drift.save_baseline("../outside", {"ticket_id": "string"})
+
+
+def test_comparing_schemas_detects_no_changes_when_schemas_match():
+    baseline = {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    }
+
+    current_schema = {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    }
+
+    result = compare_schemas(baseline, current_schema)
+
+    assert result["has_drift"] == False
+    assert result["findings"] == []
+
+
+def test_compare_schemas_detects_added_column():
+    baseline = {
+        "ticket_id": "string",
+    }
+
+    current_schema = {
+        "ticket_id": "string",
+        "vehicle_type": "string",
+    }
+
+    report = compare_schemas(baseline, current_schema)
+
+    assert report["has_drift"] is True
+    assert report["findings"] == [
+        {
+            "code": "ADDED_COLUMN",
+            "field": "vehicle_type",
+            "expected": None,
+            "actual": "string",
+            "message": "Column 'vehicle_type' was added",
+        }
+    ]
+
+
+def test_compare_schemas_detects_removed_column():
+    baseline = {
+        "ticket_id": "string",
+        "gross_weight": "number",
+    }
+
+    current_schema = {
+        "ticket_id": "string",
+    }
+
+    report = compare_schemas(baseline, current_schema)
+
+    assert report["has_drift"] is True
+    assert report["findings"][0]["code"] == "REMOVED_COLUMN"
+    assert report["findings"][0]["field"] == "gross_weight"
+    assert report["findings"][0]["expected"] == "number"
+    assert report["findings"][0]["actual"] is None
+
+
+def test_compare_schemas_detects_type_change():
+    baseline = {
+        "gross_weight": "number",
+    }
+
+    current_schema = {
+        "gross_weight": "string",
+    }
+
+    report = compare_schemas(baseline, current_schema)
+
+    assert report["has_drift"] is True
+    assert report["findings"][0]["code"] == "TYPE_CHANGED"
+    assert report["findings"][0]["field"] == "gross_weight"
+    assert report["findings"][0]["expected"] == "number"
+    assert report["findings"][0]["actual"] == "string"
+
+
+def test_compare_schemas_detects_mixed_types():
+    baseline = {
+        "gross_weight": "number",
+    }
+
+    current_schema = {
+        "gross_weight": "mixed",
+    }
+
+    report = compare_schemas(baseline, current_schema)
+
+    assert report["has_drift"] is True
+    assert report["findings"][0]["code"] == "MIXED_TYPE"
+
+
+def test_compare_schemas_does_not_report_type_change_for_unknown():
+    baseline = {
+        "gross_weight": "number",
+    }
+
+    current_schema = {
+        "gross_weight": "unknown",
+    }
+
+    report = compare_schemas(baseline, current_schema)
+
+    assert report["has_drift"] is False
+    assert report["findings"] == []
+
