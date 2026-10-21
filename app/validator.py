@@ -2,6 +2,7 @@ import csv
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from math import isfinite
 
 
 def add_issue(issues, row, field, code, message):
@@ -39,6 +40,50 @@ def validate_headers(headers, contract, issues):
         )
 
 
+def validate_record_width(records, headers, issues):
+    """Check that every CSV record has the expected number of values."""
+
+    expected_width = len(headers)
+
+    for row_number, record in enumerate(records, start=2):
+        extra_values = record.get(None)
+
+        if extra_values:
+            actual_width = expected_width + len(extra_values)
+
+            add_issue(
+                issues,
+                row=row_number,
+                field=None,
+                code="ROW_LENGTH_MISMATCH",
+                message=(
+                    f"Row contains {actual_width} values, "
+                    f"but the header defines {expected_width} columns"
+                ),
+            )
+            continue
+
+        missing_values = [
+            header
+            for header in headers
+            if record.get(header) is None
+        ]
+
+        if missing_values:
+            actual_width = expected_width - len(missing_values)
+
+            add_issue(
+                issues,
+                row=row_number,
+                field=None,
+                code="ROW_LENGTH_MISMATCH",
+                message=(
+                    f"Row contains {actual_width} values, "
+                    f"but the header defines {expected_width} columns"
+                ),
+            )
+
+
 def validate_field_value(value, field_name, rules, row, issues):
     """Validate one field value against its contract definition."""
 
@@ -61,13 +106,23 @@ def validate_field_value(value, field_name, rules, row, issues):
     if field_type == "number":
         try:
             number = float(value)
-        except ValueError:
+        except (ValueError, OverflowError):
             add_issue(
                 issues,
                 row,
                 field_name,
                 "INVALID_NUMBER",
                 f"'{field_name}' must be numeric",
+            )
+            return
+
+        if not isfinite(number):
+            add_issue(
+                issues,
+                row,
+                field_name,
+                "INVALID_NUMBER",
+                f"'{field_name}' must be a finite number",
             )
             return
 
@@ -148,8 +203,15 @@ def validate_cross_field_rules(records, contract, issues):
                 left_value = float(record[left])
                 subtract_value = float(record[subtract])
                 result_value = float(record[result])
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, OverflowError):
                 # Individual field checks report missing or invalid values.
+                continue
+
+            if not all(
+                isfinite(value)
+                for value in (left_value, subtract_value, result_value)
+            ):
+                # Field validation already reports non-finite numeric values.
                 continue
 
             expected = left_value - subtract_value
@@ -204,6 +266,8 @@ def validate_csv(csv_path, contract):
 
 
         records = list(reader)
+
+        validate_record_width(records, headers, issues)
 
     # A missing contract column means the associated checks cannot run.
     available_fields = set(headers)

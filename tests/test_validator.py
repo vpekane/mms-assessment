@@ -1,6 +1,8 @@
 import csv
 import pytest
+
 from app.validator import validate_csv
+from app.contracts import load_contract
 
 
 def write_csv(path, headers, rows):
@@ -171,3 +173,98 @@ def test_missing_csv_raises_error(tmp_path):
         pass
     else:
         raise AssertionError("Expected FileNotFoundError")
+
+
+@pytest.mark.parametrize(
+    "gross_weight",
+    [
+        "NaN",
+        "nan",
+        "Infinity",
+        "-Infinity",
+        "1e309",
+    ],
+)
+def test_validate_csv_rejects_non_finite_numbers(
+    tmp_path,
+    gross_weight,
+):
+    csv_path = tmp_path / "non_finite_weight.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        f"T-001,{gross_weight},5000,10000,2026-10-20T08:30:00\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    issue_codes = {
+        issue["code"]
+        for issue in report["issues"]
+    }
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert "INVALID_NUMBER" in issue_codes
+    assert "WEIGHT_MISMATCH" not in issue_codes
+
+
+def test_validate_csv_detects_extra_row_values(tmp_path):
+    csv_path = tmp_path / "extra_values.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        "T-001,15000,5000,10000,2026-10-20T08:30:00,EXTRA\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    row_issues = [
+        issue
+        for issue in report["issues"]
+        if issue["code"] == "ROW_LENGTH_MISMATCH"
+    ]
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert len(row_issues) == 1
+    assert row_issues[0]["row"] == 2
+    assert "6 values" in row_issues[0]["message"]
+    assert "5 columns" in row_issues[0]["message"]
+
+
+def test_validate_csv_detects_missing_row_values(tmp_path):
+    csv_path = tmp_path / "missing_values.csv"
+
+    csv_path.write_text(
+        "ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+        "T-001,15000,5000,10000\n",
+        encoding="utf-8",
+    )
+
+    contract = load_contract("weighbridge")
+    report = validate_csv(csv_path, contract)
+
+    row_issues = [
+        issue
+        for issue in report["issues"]
+        if issue["code"] == "ROW_LENGTH_MISMATCH"
+    ]
+
+    assert report["status"] == "NOT_READY"
+    assert report["invalid_records"] == 1
+    assert len(row_issues) == 1
+    assert row_issues[0]["row"] == 2
+    assert "4 values" in row_issues[0]["message"]
+    assert "5 columns" in row_issues[0]["message"]
+
+    issue_codes = {
+        issue["code"]
+        for issue in report["issues"]
+    }
+
+    assert "REQUIRED" in issue_codes
