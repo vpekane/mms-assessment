@@ -3,7 +3,6 @@ import yaml
 import pytest
 
 from app import create_app
-import app.drift_detection as drift
 
 from app import create_app
 
@@ -136,22 +135,15 @@ def test_validate_endpoint_rejects_missing_contract():
     assert response.status_code == 404
 
 
-def test_detect_drift_returns_report(client, tmp_path, monkeypatch):
-    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
-
-    drift.save_baseline("weighbridge", {
-        "ticket_id": "string",
-        "gross_weight": "number",
-    })
-
+def test_detect_drift_returns_report(client):
     response = client.post(
         "/detect-drift",
         data={
             "dataset_name": "weighbridge",
             "file": (
                 BytesIO(
-                    b"ticket_id,gross_weight\n"
-                    b"T-001,not-a-number\n"
+                    b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+                    b"T-001,not-a-number,5000,10000,2026-10-20T08:30:00\n"
                 ),
                 "incoming.csv",
             ),
@@ -164,9 +156,20 @@ def test_detect_drift_returns_report(client, tmp_path, monkeypatch):
     report = response.get_json()
 
     assert report["dataset_name"] == "weighbridge"
-    assert report["has_drift"] is True
-    assert report["findings"][0]["code"] == "TYPE_CHANGED"
-    assert report["findings"][0]["field"] == "gross_weight"
+
+    # The CSV headers match the contract.
+    assert report["has_drift"] is False
+    assert report["findings"] == []
+
+    # The invalid numeric value is still reported.
+    assert report["data_quality"]["status"] == "NOT_READY"
+
+    issue_codes = {
+        issue["code"]
+        for issue in report["data_quality"]["issues"]
+    }
+
+    assert "INVALID_NUMBER" in issue_codes
 
 
 def test_detect_drift_requires_dataset_name(client):
@@ -187,11 +190,7 @@ def test_detect_drift_requires_dataset_name(client):
     )
 
 
-def test_detect_drift_returns_404_for_missing_baseline(
-    client, tmp_path, monkeypatch
-):
-    monkeypatch.setattr(drift, "BASELINES_DIR", tmp_path)
-
+def test_detect_drift_returns_404_for_missing_contract(client):
     response = client.post(
         "/detect-drift",
         data={
@@ -205,7 +204,38 @@ def test_detect_drift_returns_404_for_missing_baseline(
     )
 
     assert response.status_code == 404
+
     assert response.get_json()["error"] == (
-        "Baseline for 'unknown_dataset' was not found"
+        "Contract file: 'unknown_dataset.yaml' was not found"
     )
 
+
+def test_detect_drift_reports_contract_schema_mismatches(client):
+    response = client.post(
+        "/detect-drift",
+        data={
+            "dataset_name": "weighbridge",
+            "file": (
+                BytesIO(
+                    b"ticket_id,gross_weight,tare_weight,unexpected_field\n"
+                    b"T-001,15000,5000,example\n"
+                ),
+                "incoming.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+
+    report = response.get_json()
+
+    assert report["has_drift"] is True
+
+    finding_codes = {
+        finding["code"]
+        for finding in report["findings"]
+    }
+
+    assert "MISSING_COLUMN" in finding_codes
+    assert "UNEXPECTED_COLUMN" in finding_codes

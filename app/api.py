@@ -5,7 +5,6 @@ from flask import Blueprint, jsonify, request
 
 from app.contracts import load_contract
 from app.validator import validate_csv
-from app.drift_detection import detect_schema_drift
 
 
 api_bp = Blueprint("api", __name__)
@@ -74,20 +73,11 @@ def detect_drift():
             csv_path = Path(temp_dir) / "uploaded.csv"
             uploaded_file.save(csv_path)
 
-            # Check the incoming schema against the saved baseline.
-            drift_report = detect_schema_drift(
-                csv_path,
-                dataset_name,
-            )
-
-            # Validate incoming values against the contract.
             contract = load_contract(dataset_name)
-            quality_report = validate_csv(csv_path, contract)
+            validation_report = validate_csv(csv_path, contract)
 
     except FileNotFoundError as exc:
-        return jsonify({
-            "error": str(exc),
-        }), 404
+        return jsonify({"error": str(exc)}), 404
 
     except ValueError as exc:
         return jsonify({
@@ -95,9 +85,20 @@ def detect_drift():
             "details": str(exc),
         }), 400
 
+    schema_issue_codes = {
+        "MISSING_COLUMN",
+        "UNEXPECTED_COLUMN",
+    }
+
+    findings = [
+        issue
+        for issue in validation_report["issues"]
+        if issue["code"] in schema_issue_codes
+    ]
+
     return jsonify({
         "dataset_name": dataset_name,
-        "has_drift": drift_report["has_drift"],
-        "findings": drift_report["findings"],
-        "data_quality": quality_report,
+        "has_drift": bool(findings),
+        "findings": findings,
+        "data_quality": validation_report,
     }), 200
