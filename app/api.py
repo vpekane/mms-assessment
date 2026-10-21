@@ -1,13 +1,20 @@
 import tempfile
+import uuid
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
 from app.contracts import load_contract
 from app.validator import validate_csv
+from app.job_store import DATABASE_PATH, create_job
+
+JOB_UPLOAD_DIR = (
+    Path(__file__).resolve().parent.parent / "data" / "uploads"
+)
 
 
 api_bp = Blueprint("api", __name__)
+
 
 @api_bp.route("/validate", methods=["POST"])
 def validate_dataset():
@@ -102,3 +109,59 @@ def detect_drift():
         "findings": findings,
         "data_quality": validation_report,
     }), 200
+
+
+@api_bp.route("/jobs", methods=["POST"])
+def submit_job():
+    uploaded_file = request.files.get("file")
+    dataset_name = request.form.get("dataset_name", "").strip()
+
+    if uploaded_file is None or not uploaded_file.filename:
+        return jsonify({
+            "error": "A CSV file is required in the 'file' field"
+        }), 400
+
+    if not dataset_name:
+        return jsonify({
+            "error": "The 'dataset_name' field is required"
+        }), 400
+
+    try:
+        contract = load_contract(dataset_name)
+
+    except FileNotFoundError as exc:
+        return jsonify({
+            "error": str(exc)
+        }), 404
+
+    except ValueError as exc:
+        return jsonify({
+            "error": "The selected contract is invalid",
+            "details": str(exc),
+        }), 400
+
+    JOB_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    upload_path = JOB_UPLOAD_DIR / f"{uuid.uuid4().hex}.csv"
+    uploaded_file.save(upload_path)
+
+    try:
+        job = create_job(
+            dataset_name=dataset_name,
+            input_path=upload_path,
+            contract=contract,
+            db_path=DATABASE_PATH,
+        )
+
+    except Exception:
+        # Avoid leaving an orphaned upload if job creation fails.
+        upload_path.unlink(missing_ok=True)
+        raise
+
+    return jsonify({
+        "job_id": job["id"],
+        "dataset_name": job["dataset_name"],
+        "status": job["status"],
+        "created_at": job["created_at"],
+        "status_url": f"/jobs/{job['id']}",
+    }), 202

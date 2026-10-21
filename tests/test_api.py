@@ -1,10 +1,11 @@
 from io import BytesIO
 import yaml
 import pytest
+from pathlib import Path
 
 from app import create_app
 
-from app import create_app
+from app.job_store import get_job
 
 
 @pytest.fixture
@@ -239,3 +240,61 @@ def test_detect_drift_reports_contract_schema_mismatches(client):
 
     assert "MISSING_COLUMN" in finding_codes
     assert "UNEXPECTED_COLUMN" in finding_codes
+
+
+def test_submit_job_creates_queued_job(tmp_path, monkeypatch):
+    write_test_contract(tmp_path)
+
+    database_path = tmp_path / "sentinel.db"
+    upload_directory = tmp_path / "uploads"
+
+    monkeypatch.setattr(
+        "app.contracts.CONTRACTS_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        "app.api.DATABASE_PATH",
+        database_path,
+    )
+    monkeypatch.setattr(
+        "app.api.JOB_UPLOAD_DIR",
+        upload_directory,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    response = client.post(
+        "/jobs",
+        data={
+            "dataset_name": "weighbridge",
+            "file": (
+                BytesIO(
+                    b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+                    b"WB001,15000,5000,10000,2026-10-20T08:30:00\n"
+                ),
+                "weighbridge.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+
+    body = response.get_json()
+
+    assert body["dataset_name"] == "weighbridge"
+    assert body["status"] == "QUEUED"
+    assert body["job_id"]
+    assert body["status_url"] == f"/jobs/{body['job_id']}"
+
+    job = get_job(body["job_id"], db_path=database_path)
+
+    assert job is not None
+    assert job["status"] == "QUEUED"
+    assert job["contract"]["version"] == "1.0"
+    assert job["result"] is None
+
+    # The worker will need this file after the request finishes.
+    assert Path(job["input_path"]).is_file()
