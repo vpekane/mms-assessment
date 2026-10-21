@@ -1,5 +1,5 @@
 import csv
-
+import pytest
 from app.validator import validate_csv
 
 
@@ -140,6 +140,26 @@ def test_missing_column_is_reported(tmp_path):
         and issue["field"] == "net_weight"
         for issue in report["issues"]
     )
+
+
+def test_validate_csv_rejects_duplicate_headers(tmp_path):
+    csv_path = tmp_path / "duplicate_headers.csv"
+
+    csv_path.write_text(
+        "ticket_id,ticket_id,gross_weight\n"
+        "WB001,WB999,15000\n",
+        encoding="utf-8",
+    )
+
+    contract = {
+        "fields": {
+            "ticket_id": {"type": "string"},
+            "gross_weight": {"type": "number"},
+        }
+    }
+
+    with pytest.raises(ValueError, match="duplicate column names"):
+        validate_csv(csv_path, contract)
 
 
 def test_missing_csv_raises_error(tmp_path):
