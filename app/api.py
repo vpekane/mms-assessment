@@ -61,12 +61,12 @@ def detect_drift():
 
     if uploaded_file is None or not uploaded_file.filename:
         return jsonify({
-            "error": "A CSV file is required in the 'file' field."
+            "error": "A CSV file is required in the 'file' field"
         }), 400
 
     if not dataset_name:
         return jsonify({
-            "error": "The 'dataset_name' field is required."
+            "error": "The 'dataset_name' field is required"
         }), 400
 
     try:
@@ -74,17 +74,30 @@ def detect_drift():
             csv_path = Path(temp_dir) / "uploaded.csv"
             uploaded_file.save(csv_path)
 
-            report = detect_schema_drift(csv_path, dataset_name)
+            # Check the incoming schema against the saved baseline.
+            drift_report = detect_schema_drift(
+                csv_path,
+                dataset_name,
+            )
 
-    except FileNotFoundError:
+            # Validate incoming values against the contract.
+            contract = load_contract(dataset_name)
+            quality_report = validate_csv(csv_path, contract)
+
+    except FileNotFoundError as exc:
         return jsonify({
-            "error": f"Baseline for '{dataset_name}' was not found"
+            "error": str(exc),
         }), 404
 
     except ValueError as exc:
         return jsonify({
-            "error": "The uploaded CSV could not be processed",
+            "error": "The uploaded CSV or contract could not be processed",
             "details": str(exc),
         }), 400
 
-    return jsonify(report), 200
+    return jsonify({
+        "dataset_name": dataset_name,
+        "has_drift": drift_report["has_drift"],
+        "findings": drift_report["findings"],
+        "data_quality": quality_report,
+    }), 200

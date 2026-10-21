@@ -183,7 +183,7 @@ def test_detect_drift_requires_dataset_name(client):
 
     assert response.status_code == 400
     assert response.get_json()["error"] == (
-        "The 'dataset_name' field is required."
+        "The 'dataset_name' field is required"
     )
 
 
