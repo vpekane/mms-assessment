@@ -1,7 +1,7 @@
 import time
 from pathlib import Path
 
-from app.job_store import (
+from app.jobs.job_store import (
     DATABASE_PATH,
     claim_next_job,
     complete_job,

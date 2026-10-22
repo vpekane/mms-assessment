@@ -1,0 +1,5 @@
+ticket_id,gross_weight,tare_weight,net_weight,timestamp
+WB001,15000,5000,10000,2026-10-20T08:30:00
+WB002,12000,4000,9000,2026-10-20T09:00:00
+WB003,-500,200,100,invalid-date
+WB001,8000,3000,5000,2026-10-20T10:00:00
