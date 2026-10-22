@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from 'react'
+import type { FormEvent } from 'react'
 import './App.css'
 
 type ContractVersion = {
@@ -13,39 +18,125 @@ type ContractsResponse = {
 
 type LoadState = 'loading' | 'success' | 'error'
 
+type ValidationIssue = {
+  row: number | null
+  field: string | null
+  code: string
+  message: string
+}
+
+type ValidationReport = {
+  status: string
+  total_records: number
+  valid_records: number
+  invalid_records: number
+  issues: ValidationIssue[]
+}
+
+type JobStatus = {
+  job_id: string
+  contract_name: string
+  contract_version: string
+  status: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  result: ValidationReport | null
+  error: string | null
+}
+
 function contractKey(contract: ContractVersion): string {
   return `${contract.contract_name}::${contract.version}`
+}
+
+function getErrorMessage(
+  payload: unknown,
+  fallback: string,
+): string {
+  if (typeof payload === 'object' && payload !== null) {
+    const data = payload as Record<string, unknown>
+
+    if (typeof data.error === 'string') {
+      if (typeof data.details === 'string') {
+        return `${data.error}: ${data.details}`
+      }
+
+      return data.error
+    }
+  }
+
+  return fallback
+}
+
+function statusClass(status: string): string {
+  const normalizedStatus = status
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+
+  return `status-pill status-${normalizedStatus}`
+}
+
+function formatTimestamp(value: string | null): string {
+  if (!value) {
+    return '—'
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString()
 }
 
 function App() {
   const [contracts, setContracts] = useState<ContractVersion[]>([])
   const [selectedKey, setSelectedKey] = useState('')
   const [loadState, setLoadState] = useState<LoadState>('loading')
-  const [error, setError] = useState('')
+  const [contractError, setContractError] = useState('')
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [fileError, setFileError] = useState('')
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+
+  const [activeJobId, setActiveJobId] = useState('')
+  const [job, setJob] = useState<JobStatus | null>(null)
+  const [pollError, setPollError] = useState('')
 
   const loadContracts = useCallback(async () => {
     setLoadState('loading')
-    setError('')
+    setContractError('')
 
     try {
       const response = await fetch('/contracts')
 
+      const payload = await response.json().catch(() => null)
+
       if (!response.ok) {
         throw new Error(
-          `The API returned HTTP ${response.status}.`,
+          getErrorMessage(
+            payload,
+            `The API returned HTTP ${response.status}.`,
+          ),
         )
       }
 
-      const data: ContractsResponse = await response.json()
-
-      if (!Array.isArray(data.contracts)) {
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        !Array.isArray(payload.contracts)
+      ) {
         throw new Error('The API returned an unexpected response.')
       }
 
+      const data = payload as ContractsResponse
+
       setContracts(data.contracts)
 
-      // Keep the current selection if it still exists.
-      // Otherwise, select the first available contract version.
       setSelectedKey((currentKey) => {
         const selectionStillExists = data.contracts.some(
           (contract) => contractKey(contract) === currentKey,
@@ -61,12 +152,12 @@ function App() {
       })
 
       setLoadState('success')
-    } catch (err) {
+    } catch (error) {
       setLoadState('error')
 
-      setError(
-        err instanceof Error
-          ? err.message
+      setContractError(
+        error instanceof Error
+          ? error.message
           : 'An unexpected error occurred while loading contracts.',
       )
     }
@@ -79,6 +170,178 @@ function App() {
   const selectedContract = contracts.find(
     (contract) => contractKey(contract) === selectedKey,
   )
+
+  function selectFile(file: File | undefined) {
+    if (!file) {
+      return
+    }
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setSelectedFile(null)
+      setFileError('Please select a CSV file with a .csv extension.')
+      return
+    }
+
+    setSelectedFile(file)
+    setFileError('')
+    setSubmitError('')
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!selectedContract) {
+      setSubmitError('Please select a contract and version.')
+      return
+    }
+
+    if (!selectedFile) {
+      setFileError('Please select a CSV file before submitting.')
+      return
+    }
+
+    setIsSubmitting(true)
+    setSubmitError('')
+    setPollError('')
+    setJob(null)
+    setActiveJobId('')
+
+    try {
+      const formData = new FormData()
+
+      formData.append('file', selectedFile)
+      formData.append(
+        'contract_name',
+        selectedContract.contract_name,
+      )
+      formData.append(
+        'contract_version',
+        selectedContract.version,
+      )
+
+      const response = await fetch('/jobs', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(
+            payload,
+            `Job submission failed with HTTP ${response.status}.`,
+          ),
+        )
+      }
+
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        typeof payload.job_id !== 'string'
+      ) {
+        throw new Error(
+          'The API accepted the request but did not return a job ID.',
+        )
+      }
+
+      setActiveJobId(payload.job_id)
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'An unexpected error occurred during submission.',
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return
+    }
+
+    let cancelled = false
+    let timeoutId: number | undefined
+
+    async function pollJob() {
+      try {
+        const response = await fetch(
+          `/jobs/${encodeURIComponent(activeJobId)}`,
+        )
+
+        const payload = await response.json().catch(() => null)
+
+        if (!response.ok) {
+          throw new Error(
+            getErrorMessage(
+              payload,
+              `Status request failed with HTTP ${response.status}.`,
+            ),
+          )
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        const currentJob = payload as JobStatus
+
+        setJob(currentJob)
+        setPollError('')
+
+        if (
+          currentJob.status === 'QUEUED' ||
+          currentJob.status === 'RUNNING'
+        ) {
+          timeoutId = window.setTimeout(() => {
+            void pollJob()
+          }, 1500)
+        }
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setPollError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to retrieve the job status.',
+        )
+
+        // Retry status checks if the API is temporarily unavailable.
+        timeoutId = window.setTimeout(() => {
+          void pollJob()
+        }, 3000)
+      }
+    }
+
+    void pollJob()
+
+    return () => {
+      cancelled = true
+
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+  }, [activeJobId])
+
+  const jobInProgress = Boolean(
+    activeJobId &&
+      (!job ||
+        job.status === 'QUEUED' ||
+        job.status === 'RUNNING'),
+  )
+
+  const activeWorkflowStep = !activeJobId
+    ? selectedFile
+      ? 2
+      : 1
+    : job?.status === 'COMPLETED' || job?.status === 'FAILED'
+      ? 3
+      : 2
 
   return (
     <div className="app-shell">
@@ -147,8 +410,7 @@ function App() {
             {loadState === 'error' && (
               <div className="error-box" role="alert">
                 <strong>Couldn't load contracts</strong>
-
-                <p>{error}</p>
+                <p>{contractError}</p>
 
                 <button
                   className="secondary-button"
@@ -252,7 +514,6 @@ function App() {
 
           <aside className="panel workflow-panel">
             <p className="eyebrow">VALIDATION WORKFLOW</p>
-
             <h2>From upload to insight</h2>
 
             <p className="workflow-description">
@@ -260,7 +521,11 @@ function App() {
             </p>
 
             <div className="workflow-steps">
-              <div className="workflow-step workflow-step-active">
+              <div
+                className={`workflow-step ${
+                  activeWorkflowStep === 1 ? 'workflow-step-active' : ''
+                }`}
+              >
                 <span className="workflow-step-icon">1</span>
 
                 <div>
@@ -268,29 +533,47 @@ function App() {
                   <p>Define the expected data structure and rules.</p>
                 </div>
 
-                <span className="step-state">Current</span>
+                {activeWorkflowStep === 1 && (
+                  <span className="step-state">Current</span>
+                )}
               </div>
 
               <div className="workflow-connector" />
 
-              <div className="workflow-step">
+              <div
+                className={`workflow-step ${
+                  activeWorkflowStep === 2 ? 'workflow-step-active' : ''
+                }`}
+              >
                 <span className="workflow-step-icon">2</span>
 
                 <div>
                   <strong>Upload a CSV</strong>
                   <p>Submit the dataset you want to inspect.</p>
                 </div>
+
+                {activeWorkflowStep === 2 && (
+                  <span className="step-state">Current</span>
+                )}
               </div>
 
               <div className="workflow-connector" />
 
-              <div className="workflow-step">
+              <div
+                className={`workflow-step ${
+                  activeWorkflowStep === 3 ? 'workflow-step-active' : ''
+                }`}
+              >
                 <span className="workflow-step-icon">3</span>
 
                 <div>
                   <strong>Review the report</strong>
                   <p>Understand the results and investigate issues.</p>
                 </div>
+
+                {activeWorkflowStep === 3 && (
+                  <span className="step-state">Current</span>
+                )}
               </div>
             </div>
 
@@ -308,9 +591,339 @@ function App() {
           </aside>
         </div>
 
+        <section className="panel upload-panel">
+          <div className="panel-heading">
+            <span className="step-number">02</span>
+
+            <div>
+              <h2>Upload your CSV</h2>
+              <p>
+                Choose the data you want Sentinel to validate against the
+                selected contract.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <label
+              className={`upload-dropzone ${
+                isDragging ? 'upload-dropzone-dragging' : ''
+              } ${selectedFile ? 'upload-dropzone-selected' : ''}`}
+              htmlFor="csv-file"
+              onDragOver={(event) => {
+                event.preventDefault()
+                setIsDragging(true)
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault()
+                setIsDragging(false)
+                selectFile(event.dataTransfer.files.item(0) ?? undefined)
+              }}
+            >
+              <input
+                id="csv-file"
+                className="file-input"
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(event) => {
+                  selectFile(event.currentTarget.files?.[0])
+                  event.currentTarget.value = ''
+                }}
+              />
+
+              <span className="upload-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                >
+                  <path
+                    d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+
+              <strong>
+                {selectedFile
+                  ? selectedFile.name
+                  : 'Drop your CSV file here'}
+              </strong>
+
+              <span className="upload-instructions">
+                or <span className="browse-link">browse files</span>
+              </span>
+
+              <span className="upload-hint">
+                CSV files only
+                {selectedFile
+                  ? ` · ${(selectedFile.size / 1024).toFixed(1)} KB`
+                  : ' · Select a file from your computer'}
+              </span>
+            </label>
+
+            {fileError && (
+              <p className="inline-error" role="alert">
+                {fileError}
+              </p>
+            )}
+
+            <div className="submission-summary">
+              <div>
+                <span className="summary-label">Selected contract</span>
+
+                <strong>
+                  {selectedContract
+                    ? `${selectedContract.display_name} · v${selectedContract.version}`
+                    : 'No contract selected'}
+                </strong>
+              </div>
+
+              <span className="summary-separator" />
+
+              <div>
+                <span className="summary-label">Processing</span>
+                <strong>Asynchronous validation</strong>
+              </div>
+            </div>
+
+            {submitError && (
+              <div className="error-box submission-error" role="alert">
+                <strong>Could not submit validation</strong>
+                <p>{submitError}</p>
+              </div>
+            )}
+
+            <div className="submission-actions">
+              <p>
+                Sentinel will create a job and validate the file in the
+                background.
+              </p>
+
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={
+                  !selectedContract ||
+                  !selectedFile ||
+                  isSubmitting ||
+                  jobInProgress
+                }
+              >
+                {isSubmitting
+                  ? 'Submitting…'
+                  : jobInProgress
+                    ? 'Validation in progress…'
+                    : 'Validate dataset'}
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        {activeJobId && (
+          <section className="panel results-panel" aria-live="polite">
+            <div className="results-heading">
+              <div className="panel-heading results-title">
+                <span className="step-number">03</span>
+
+                <div>
+                  <h2>Validation results</h2>
+                  <p>
+                    {job
+                      ? `${job.contract_name} · version ${job.contract_version}`
+                      : 'Your job has been accepted by Sentinel.'}
+                  </p>
+                </div>
+              </div>
+
+              <span className={statusClass(job?.status ?? 'QUEUED')}>
+                {job?.status ?? 'QUEUED'}
+              </span>
+            </div>
+
+            <div className="job-id-row">
+              <span>Job ID</span>
+              <code>{activeJobId}</code>
+              <span className="job-created">
+                Created: {formatTimestamp(job?.created_at ?? null)}
+              </span>
+            </div>
+
+            {pollError && (
+              <div className="poll-warning" role="status">
+                We couldn't refresh the job status: {pollError}
+                <br />
+                Sentinel will try again automatically.
+              </div>
+            )}
+
+            {!job && (
+              <div className="message-box result-message" role="status">
+                <span className="loading-spinner" />
+                Retrieving job status…
+              </div>
+            )}
+
+            {job?.status === 'QUEUED' && (
+              <div className="message-box result-message" role="status">
+                <span className="loading-spinner" />
+                Your job is queued and waiting for a worker.
+              </div>
+            )}
+
+            {job?.status === 'RUNNING' && (
+              <div className="message-box result-message" role="status">
+                <span className="loading-spinner" />
+                Sentinel is validating your CSV against the selected
+                contract.
+              </div>
+            )}
+
+            {job?.status === 'FAILED' && (
+              <div className="error-box job-failure" role="alert">
+                <strong>Job processing failed</strong>
+                <p>
+                  {job.error || 'Sentinel could not process this job.'}
+                </p>
+              </div>
+            )}
+
+            {job?.status === 'COMPLETED' && job.result && (
+              <>
+                <div className="quality-summary">
+                  <div>
+                    <span className="summary-label">Data quality</span>
+
+                    <span
+                      className={statusClass(job.result.status)}
+                    >
+                      {job.result.status}
+                    </span>
+                  </div>
+
+                  <p>
+                    {job.result.status === 'READY'
+                      ? 'The dataset passed the contract checks.'
+                      : 'The dataset contains issues that need attention.'}
+                  </p>
+                </div>
+
+                <div className="metrics-grid">
+                  <div className="metric-card">
+                    <span>Total records</span>
+                    <strong>{job.result.total_records}</strong>
+                  </div>
+
+                  <div className="metric-card">
+                    <span>Valid records</span>
+                    <strong>{job.result.valid_records}</strong>
+                  </div>
+
+                  <div className="metric-card">
+                    <span>Invalid records</span>
+                    <strong>{job.result.invalid_records}</strong>
+                  </div>
+
+                  <div className="metric-card">
+                    <span>Issues detected</span>
+                    <strong>{job.result.issues.length}</strong>
+                  </div>
+                </div>
+
+                <div className="issues-section">
+                  <div className="issues-heading">
+                    <div>
+                      <h3>Detected issues</h3>
+                      <p>
+                        Findings reported by the validation engine.
+                      </p>
+                    </div>
+
+                    <span className="issue-count">
+                      {job.result.issues.length}
+                    </span>
+                  </div>
+
+                  {job.result.issues.length === 0 ? (
+                    <div className="no-issues">
+                      <span aria-hidden="true">✓</span>
+                      <div>
+                        <strong>No issues detected</strong>
+                        <p>
+                          The uploaded data passed all checks defined by
+                          this contract.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="issues-table-wrapper">
+                      <table className="issues-table">
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            <th>Field</th>
+                            <th>Issue code</th>
+                            <th>Description</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {job.result.issues.map((issue, index) => (
+                            <tr
+                              key={`${issue.row}-${issue.field}-${issue.code}-${index}`}
+                            >
+                              <td>
+                                {issue.row ?? 'Dataset'}
+                              </td>
+                              <td>
+                                <code>{issue.field ?? '—'}</code>
+                              </td>
+                              <td>
+                                <span className="issue-code">
+                                  {issue.code}
+                                </span>
+                              </td>
+                              <td>{issue.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="job-timestamps">
+                  <span>
+                    Started: {formatTimestamp(job.started_at)}
+                  </span>
+                  <span>
+                    Finished: {formatTimestamp(job.finished_at)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {job?.status === 'COMPLETED' && !job.result && (
+              <div className="error-box job-failure" role="alert">
+                The job completed, but no validation report was returned.
+              </div>
+            )}
+          </section>
+        )}
+
         <footer className="page-footer">
           <span>Sentinel</span>
-          <span>Automated Data Quality &amp; Integration Monitoring</span>
+          <span>
+            Automated Data Quality &amp; Integration Monitoring
+          </span>
         </footer>
       </main>
     </div>
