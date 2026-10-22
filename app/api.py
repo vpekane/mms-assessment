@@ -54,6 +54,7 @@ def _load_requested_contract(contract_name, contract_version):
 
 
 @api_bp.route("/contracts", methods=["GET"])
+@clerk_required
 def get_contracts():
     """List the available contract versions."""
     try:
@@ -71,6 +72,7 @@ def get_contracts():
 
 
 @api_bp.route("/validate", methods=["POST"])
+@clerk_required
 def validate_dataset():
     """Validate an uploaded CSV against an explicit contract version."""
     uploaded_file = request.files.get("file")
@@ -120,6 +122,7 @@ def validate_dataset():
 
 
 @api_bp.route("/detect-drift", methods=["POST"])
+@clerk_required
 def detect_drift():
     """Report contract schema mismatches and data-quality issues."""
     uploaded_file = request.files.get("file")
@@ -189,6 +192,7 @@ def detect_drift():
 
 
 @api_bp.route("/jobs", methods=["POST"])
+@clerk_required
 def submit_job():
     """Accept a CSV for asynchronous validation."""
     uploaded_file = request.files.get("file")
@@ -250,6 +254,7 @@ def submit_job():
 
 
 @api_bp.route("/jobs/<job_id>", methods=["GET"])
+@clerk_required
 def get_job_status(job_id):
     """Return the public status and result of a submitted job."""
     job = get_job(

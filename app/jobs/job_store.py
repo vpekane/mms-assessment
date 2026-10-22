@@ -36,6 +36,7 @@ def init_db(db_path=DATABASE_PATH):
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY,
+                    owner_id TEXT,
                     dataset_name TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (
                         status IN (
@@ -53,6 +54,24 @@ def init_db(db_path=DATABASE_PATH):
                     started_at TEXT,
                     finished_at TEXT
                 )
+                """
+            )
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(jobs)"
+                    )
+                }
+
+            if "owner_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN owner_id TEXT"
+                )
+
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_jobs_owner_id
+                ON jobs (owner_id)
                 """
             )
 
@@ -83,7 +102,7 @@ def _decode_job(row):
     return job
 
 
-def create_job(dataset_name, input_path, contract, db_path=DATABASE_PATH):
+def create_job(dataset_name, input_path, contract, db_path=DATABASE_PATH, owner_id=None):
     """Persist a new job in the QUEUED state."""
     init_db(db_path)
 
@@ -96,16 +115,18 @@ def create_job(dataset_name, input_path, contract, db_path=DATABASE_PATH):
                 """
                 INSERT INTO jobs (
                     id,
+                    owner_id,
                     dataset_name,
                     status,
                     input_path,
                     contract_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
+                    owner_id,
                     dataset_name,
                     "QUEUED",
                     str(input_path),
@@ -117,15 +138,25 @@ def create_job(dataset_name, input_path, contract, db_path=DATABASE_PATH):
     return get_job(job_id, db_path)
 
 
-def get_job(job_id, db_path=DATABASE_PATH):
-    """Retrieve a job by its ID, or return None if it does not exist."""
+def get_job(job_id, db_path=DATABASE_PATH, owner_id=None):
+    """Retrieve a job, optionally restricting access to its owner."""
     init_db(db_path)
 
     with closing(_connect(db_path)) as connection:
-        row = connection.execute(
-            "SELECT * FROM jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
+        if owner_id is None:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE id = ? AND owner_id = ?
+                """,
+                (job_id, owner_id),
+            ).fetchone()
 
     return _decode_job(row)
 

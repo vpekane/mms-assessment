@@ -6,6 +6,7 @@ import {
 import type { FormEvent } from 'react'
 import './App.css'
 import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
+import { useAuthenticatedFetch } from './useAuthenticatedFetch'
 import BackendAuthCheck from './BackendAuthCheck'
 
 
@@ -94,6 +95,7 @@ function formatTimestamp(value: string | null): string {
 }
 
 function App() {
+  const authenticatedFetch = useAuthenticatedFetch()
   const [contracts, setContracts] = useState<ContractVersion[]>([])
   const [selectedKey, setSelectedKey] = useState('')
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -115,7 +117,7 @@ function App() {
     setContractError('')
 
     try {
-      const response = await fetch('/contracts')
+      const response = await authenticatedFetch('/contracts')
 
       const payload = await response.json().catch(() => null)
 
@@ -164,7 +166,7 @@ function App() {
           : 'An unexpected error occurred while loading contracts.',
       )
     }
-  }, [])
+  }, [authenticatedFetch])
 
   useEffect(() => {
     void loadContracts()
@@ -222,7 +224,7 @@ function App() {
         selectedContract.version,
       )
 
-      const response = await fetch('/jobs', {
+      const response = await authenticatedFetch('/jobs', {
         method: 'POST',
         body: formData,
       })
@@ -270,7 +272,7 @@ function App() {
 
     async function pollJob() {
       try {
-        const response = await fetch(
+        const response = await authenticatedFetch(
           `/jobs/${encodeURIComponent(activeJobId)}`,
         )
 
@@ -329,7 +331,7 @@ function App() {
         window.clearTimeout(timeoutId)
       }
     }
-  }, [activeJobId])
+  }, [activeJobId, authenticatedFetch])
 
   const jobInProgress = Boolean(
     activeJobId &&
