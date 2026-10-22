@@ -18,4 +18,26 @@ __pycache__/
 .idea/
 .DS_Store
 
+# Sentinel runtime data: SQLite database and uploaded files
 data/
+
+# Frontend dependencies
+frontend/node_modules/
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+
+# Frontend environment variables and secrets
+frontend/.env*
+!frontend/.env.example
+
+# Frontend package-manager logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/pnpm-debug.log*
+
+# Operating system files
+.DS_Store
+Thumbs.db
