@@ -11,12 +11,17 @@ def write_test_contract(directory, fields):
         "fields": fields,
     }
 
-    contract_path = directory / "test_dataset.yaml"
+    contract_directory = directory / "test_dataset"
+    contract_directory.mkdir(parents=True, exist_ok=True)
+
+    contract_path = (
+        contract_directory / "test_dataset_1.0.yaml"
+    )
+
     contract_path.write_text(
         yaml.safe_dump(contract),
         encoding="utf-8",
     )
-
 
 def test_cli_validates_csv_successfully(
     tmp_path,
@@ -50,6 +55,8 @@ def test_cli_validates_csv_successfully(
         "validate",
         "--contract",
         "test_dataset",
+        "--contract_version",
+        "1.0",
         str(csv_path),
     ])
 
@@ -93,6 +100,8 @@ def test_cli_returns_nonzero_for_invalid_data(
         "validate",
         "--contract",
         "test_dataset",
+        "--contract_version",
+        "1.0",
         str(csv_path),
         "--json",
     ])

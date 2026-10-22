@@ -5,8 +5,8 @@ from pathlib import Path
 
 from app import create_app
 
-from app.job_store import get_job
-from app.worker import process_next_job
+from app.jobs.job_store import get_job
+from app.workers.worker import process_next_job
 
 
 @pytest.fixture
@@ -60,7 +60,10 @@ def write_test_contract(directory):
         ],
     }
 
-    contract_path = directory / "weighbridge.yaml"
+    contract_directory = directory / "weighbridge"
+    contract_directory.mkdir(parents=True, exist_ok=True)
+
+    contract_path = contract_directory / "weighbridge_1.0.yaml"
     contract_path.write_text(
         yaml.safe_dump(contract),
         encoding="utf-8",
@@ -83,6 +86,7 @@ def test_validate_endpoint_returns_report(tmp_path, monkeypatch):
         "/validate",
         data={
             "contract_name": "weighbridge",
+            "contract_version": '1.0',
             "file": (
                 BytesIO(
                     b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
@@ -126,6 +130,7 @@ def test_validate_endpoint_rejects_missing_contract():
         "/validate",
         data={
             "contract_name": "does_not_exist",
+            "contract_version": "1.0",
             "file": (
                 BytesIO(b"ticket_id\nWB001\n"),
                 "weighbridge.csv",
@@ -141,7 +146,8 @@ def test_detect_drift_returns_report(client):
     response = client.post(
         "/detect-drift",
         data={
-            "dataset_name": "weighbridge",
+            "contract_name": "weighbridge",
+            "contract_version": '1.0',
             "file": (
                 BytesIO(
                     b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
@@ -157,7 +163,7 @@ def test_detect_drift_returns_report(client):
 
     report = response.get_json()
 
-    assert report["dataset_name"] == "weighbridge"
+    assert report["contract_name"] == "weighbridge"
 
     # The CSV headers match the contract.
     assert report["has_drift"] is False
@@ -188,7 +194,7 @@ def test_detect_drift_requires_dataset_name(client):
 
     assert response.status_code == 400
     assert response.get_json()["error"] == (
-        "The 'dataset_name' field is required"
+        "The 'contract_name' field is required"
     )
 
 
@@ -196,7 +202,8 @@ def test_detect_drift_returns_404_for_missing_contract(client):
     response = client.post(
         "/detect-drift",
         data={
-            "dataset_name": "unknown_dataset",
+            "contract_name": "unknown_dataset",
+            "contract_version": "1.0",
             "file": (
                 BytesIO(b"ticket_id\nT-001\n"),
                 "incoming.csv",
@@ -208,7 +215,7 @@ def test_detect_drift_returns_404_for_missing_contract(client):
     assert response.status_code == 404
 
     assert response.get_json()["error"] == (
-        "Contract file: 'unknown_dataset.yaml' was not found"
+        "Contract 'unknown_dataset' version 'unknown_dataset_1.0' was not found"
     )
 
 
@@ -216,7 +223,8 @@ def test_detect_drift_reports_contract_schema_mismatches(client):
     response = client.post(
         "/detect-drift",
         data={
-            "dataset_name": "weighbridge",
+            "contract_name": "weighbridge",
+            "contract_version": '1.0',
             "file": (
                 BytesIO(
                     b"ticket_id,gross_weight,tare_weight,unexpected_field\n"
@@ -269,7 +277,8 @@ def test_submit_job_creates_queued_job(tmp_path, monkeypatch):
     response = client.post(
         "/jobs",
         data={
-            "dataset_name": "weighbridge",
+            "contract_name": "weighbridge",
+            "contract_version": "1.0",
             "file": (
                 BytesIO(
                     b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
@@ -285,7 +294,7 @@ def test_submit_job_creates_queued_job(tmp_path, monkeypatch):
 
     body = response.get_json()
 
-    assert body["dataset_name"] == "weighbridge"
+    assert body["contract_name"] == "weighbridge"
     assert body["status"] == "QUEUED"
     assert body["job_id"]
     assert body["status_url"] == f"/jobs/{body['job_id']}"
@@ -347,7 +356,8 @@ def test_get_job_tracks_job_through_completion(tmp_path, monkeypatch):
     submission = client.post(
         "/jobs",
         data={
-            "dataset_name": "weighbridge",
+            "contract_name": "weighbridge",
+            "contract_version": "1.0",
             "file": (
                 BytesIO(
                     b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
@@ -371,7 +381,7 @@ def test_get_job_tracks_job_through_completion(tmp_path, monkeypatch):
     queued_job = queued_response.get_json()
 
     assert queued_job["job_id"] == job_id
-    assert queued_job["dataset_name"] == "weighbridge"
+    assert queued_job["contract_name"] == "weighbridge"
     assert queued_job["status"] == "QUEUED"
     assert queued_job["result"] is None
     assert queued_job["error"] is None
@@ -396,4 +406,33 @@ def test_get_job_tracks_job_through_completion(tmp_path, monkeypatch):
     # Internal implementation details aren't exposed to API clients.
     assert "input_path" not in completed_job
     assert "contract" not in completed_job
+
+def test_get_contracts_returns_available_versions(
+    tmp_path,
+    monkeypatch,
+):
+    write_test_contract(tmp_path)
+
+    monkeypatch.setattr(
+        "app.contracts.CONTRACTS_DIR",
+        tmp_path,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    response = client.get("/contracts")
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["contracts"] == [
+        {
+            "contract_name": "weighbridge",
+            "display_name": "weighbridge_tickets",
+            "version": "1.0",
+        }
+    ]
 

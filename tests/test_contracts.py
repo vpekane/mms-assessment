@@ -1,6 +1,6 @@
 import pytest
 
-from app.contracts import validate_contract, load_contract
+from app.contracts import validate_contract
 
 
 def valid_contract():

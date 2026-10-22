@@ -1,5 +1,5 @@
-from app.job_store import create_job, get_job
-from app.worker import process_next_job
+from app.jobs.job_store import create_job, get_job
+from app.workers.worker import process_next_job
 
 
 def test_worker_processes_queued_job(tmp_path):

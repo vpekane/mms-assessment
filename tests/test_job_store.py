@@ -1,4 +1,4 @@
-from app.job_store import (
+from app.jobs.job_store import (
     claim_next_job,
     complete_job,
     create_job,

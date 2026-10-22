@@ -197,7 +197,7 @@ def test_validate_csv_rejects_non_finite_numbers(
         encoding="utf-8",
     )
 
-    contract = load_contract("weighbridge")
+    contract = load_contract("weighbridge", "1.0")
     report = validate_csv(csv_path, contract)
 
     issue_codes = {
@@ -220,7 +220,7 @@ def test_validate_csv_detects_extra_row_values(tmp_path):
         encoding="utf-8",
     )
 
-    contract = load_contract("weighbridge")
+    contract = load_contract("weighbridge", "1.0")
     report = validate_csv(csv_path, contract)
 
     row_issues = [
@@ -246,7 +246,7 @@ def test_validate_csv_detects_missing_row_values(tmp_path):
         encoding="utf-8",
     )
 
-    contract = load_contract("weighbridge")
+    contract = load_contract("weighbridge", "1.0")
     report = validate_csv(csv_path, contract)
 
     row_issues = [
