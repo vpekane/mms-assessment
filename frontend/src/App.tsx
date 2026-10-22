@@ -5,6 +5,8 @@ import {
 } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
+
 
 type ContractVersion = {
   contract_name: string
@@ -346,6 +348,14 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
+        <Show when="signed-out">
+          <SignInButton />
+          <SignUpButton />
+        </Show>
+
+        <Show when="signed-in">
+          <UserButton />
+        </Show>
         <a className="brand" href="/" aria-label="Sentinel home">
           <span className="brand-mark">S</span>
 
