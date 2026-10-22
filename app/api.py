@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from app.contracts import load_contract
 from app.validator import validate_csv
-from app.job_store import DATABASE_PATH, create_job
+from app.job_store import DATABASE_PATH, create_job, get_job
 
 JOB_UPLOAD_DIR = (
     Path(__file__).resolve().parent.parent / "data" / "uploads"
@@ -165,3 +165,26 @@ def submit_job():
         "created_at": job["created_at"],
         "status_url": f"/jobs/{job['id']}",
     }), 202
+
+
+@api_bp.route("/jobs/<job_id>", methods=["GET"])
+def get_job_status(job_id):
+    """Return the public status and result of a submitted job"""
+
+    job = get_job(job_id, db_path=DATABASE_PATH)
+
+    if job is None:
+        return jsonify({
+            "error": f"Job '{job_id}' was not found"
+        }), 404
+
+    return jsonify({
+        "job_id": job_id,
+        "dataset_name": job["dataset_name"],
+        "status": job["status"],
+        "created_at": job["created_at"],
+        "started_at": job["started_at"],
+        "finished_at": job["finished_at"],
+        "result": job["result"],
+        "error": job["error"],
+    }), 200

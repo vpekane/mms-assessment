@@ -6,6 +6,7 @@ from pathlib import Path
 from app import create_app
 
 from app.job_store import get_job
+from app.worker import process_next_job
 
 
 @pytest.fixture
@@ -298,3 +299,101 @@ def test_submit_job_creates_queued_job(tmp_path, monkeypatch):
 
     # The worker will need this file after the request finishes.
     assert Path(job["input_path"]).is_file()
+
+
+def test_get_job_returns_404_for_unknown_id(tmp_path, monkeypatch):
+    database_path = tmp_path / "sentinel.db"
+
+    monkeypatch.setattr(
+        "app.api.DATABASE_PATH",
+        database_path,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    response = client.get("/jobs/unknown-job-id")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == (
+        "Job 'unknown-job-id' was not found"
+    )
+
+
+def test_get_job_tracks_job_through_completion(tmp_path, monkeypatch):
+    write_test_contract(tmp_path)
+
+    database_path = tmp_path / "sentinel.db"
+    upload_directory = tmp_path / "uploads"
+
+    monkeypatch.setattr(
+        "app.contracts.CONTRACTS_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        "app.api.DATABASE_PATH",
+        database_path,
+    )
+    monkeypatch.setattr(
+        "app.api.JOB_UPLOAD_DIR",
+        upload_directory,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+
+    submission = client.post(
+        "/jobs",
+        data={
+            "dataset_name": "weighbridge",
+            "file": (
+                BytesIO(
+                    b"ticket_id,gross_weight,tare_weight,net_weight,timestamp\n"
+                    b"WB001,15000,5000,10000,2026-10-20T08:30:00\n"
+                ),
+                "weighbridge.csv",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert submission.status_code == 202
+
+    job_id = submission.get_json()["job_id"]
+
+    # Before the worker processes the job, its status is QUEUED.
+    queued_response = client.get(f"/jobs/{job_id}")
+
+    assert queued_response.status_code == 200
+
+    queued_job = queued_response.get_json()
+
+    assert queued_job["job_id"] == job_id
+    assert queued_job["dataset_name"] == "weighbridge"
+    assert queued_job["status"] == "QUEUED"
+    assert queued_job["result"] is None
+    assert queued_job["error"] is None
+
+    # The worker processes the queued job.
+    assert process_next_job(db_path=database_path) is True
+
+    # The same endpoint now exposes the completed result.
+    completed_response = client.get(f"/jobs/{job_id}")
+
+    assert completed_response.status_code == 200
+
+    completed_job = completed_response.get_json()
+
+    assert completed_job["job_id"] == job_id
+    assert completed_job["status"] == "COMPLETED"
+    assert completed_job["result"]["status"] == "READY"
+    assert completed_job["result"]["total_records"] == 1
+    assert completed_job["result"]["issues"] == []
+    assert completed_job["finished_at"] is not None
+
+    # Internal implementation details aren't exposed to API clients.
+    assert "input_path" not in completed_job
+    assert "contract" not in completed_job
+
