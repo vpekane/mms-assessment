@@ -4,7 +4,7 @@ from clerk_backend_api import (
     AuthenticateRequestOptions,
     authenticate_request,
 )
-from flask import abort, current_app, g, request
+from flask import current_app, g, jsonify, request
 
 
 def clerk_required(view):
@@ -28,12 +28,28 @@ def clerk_required(view):
                 if state.reason
                 else "unauthorized"
             )
-            abort(401, description=reason)
+
+            current_app.logger.warning(
+                "Clerk authentication rejected request: %s",
+                reason,
+            )
+
+            return jsonify({
+                "error": "Unauthorized",
+                "details": reason,
+            }), 401
 
         user_id = state.payload.get("sub")
 
         if not user_id:
-            abort(401, description="User identity missing")
+            current_app.logger.warning(
+                "Clerk authentication succeeded without a user ID."
+            )
+
+            return jsonify({
+                "error": "Unauthorized",
+                "details": "User identity missing",
+            }), 401
 
         g.auth_state = state
         g.user_id = user_id

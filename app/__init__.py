@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from flask_cors import CORS
 from dotenv import load_dotenv
 from flask import Flask
 
@@ -30,6 +31,17 @@ def create_app():
         ).split(",")
         if origin.strip()
     ]
+
+    CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": app.config["CLERK_AUTHORIZED_PARTIES"]
+        }
+    },
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
 
     from app.api import api_bp
 
