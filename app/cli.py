@@ -33,7 +33,13 @@ def build_parser():
     validate_parser.add_argument(
         "--contract",
         required=True,
-        help="Contract filename without the .yaml extension.",
+        help="Contract identifier such as 'weighbridge'.",
+    )
+
+    validate_parser.add_argument(
+        "--contract_version",
+        required=True,
+        help="Explicit contract version, such as '1.0'."
     )
 
     validate_parser.add_argument(
@@ -80,7 +86,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        contract = load_contract(args.contract)
+        contract = load_contract(args.contract, args.contract_version)
 
         report = validate_csv(
             args.csv_path,
