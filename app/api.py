@@ -2,7 +2,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
+from app.auth import clerk_required
 
 from app.contracts import list_contracts, load_contract
 from app.validator import validate_csv
@@ -10,6 +11,16 @@ from app.jobs.job_store import DATABASE_PATH, create_job, get_job
 
 
 api_bp = Blueprint("api", __name__)
+
+
+@api_bp.route("/me", methods=["GET"])
+@clerk_required
+def get_current_user():
+    """Return the identity of the authenticated user."""
+    return jsonify({
+        "user_id": g.user_id,
+    }), 200
+
 
 JOB_UPLOAD_DIR = (
     Path(__file__).resolve().parent.parent / "data" / "uploads"
