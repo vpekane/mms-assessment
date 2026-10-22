@@ -1,5 +1,6 @@
 from math import isfinite
 from pathlib import Path
+import re
 
 import yaml
 
@@ -8,6 +9,14 @@ SUPPORTED_FIELD_TYPES = {"string", "number", "datetime"}
 SUPPORTED_RULE_TYPES = {"difference_equals"}
 
 FIELD_RULE_KEYS = {"type", "required", "unique", "minimum"}
+
+CONTRACT_NAME_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9_-]*\Z"
+)
+
+CONTRACT_VERSION_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._+-]*\Z"
+)
 
 CROSS_FIELD_RULE_KEYS = {
     "name",
@@ -189,23 +198,99 @@ def validate_contract(contract: dict) -> None:
             )
 
 
-def load_contract(contract_name: str) -> dict:
-    """Load a YAML contract and validate its structure"""
+def load_contract(contract_name: str, contract_version: str) -> dict:
+    """Load and validate a specific version of a YAML contract."""
+    if (
+        not isinstance(contract_name, str)
+        or not CONTRACT_NAME_PATTERN.fullmatch(contract_name)
+    ):
+        raise ValueError("Invalid contract name")
 
-    contract_path = CONTRACTS_DIR / f"{contract_name}.yaml"
+    if (
+        not isinstance(contract_version, str)
+        or not CONTRACT_VERSION_PATTERN.fullmatch(contract_version)
+    ):
+        raise ValueError("Invalid contract version")
+
+    contract_path = (
+        CONTRACTS_DIR
+        / contract_name
+        / f"{contract_name}_{contract_version}.yaml"
+    )
 
     try:
-        with contract_path.open('r', encoding="utf-8") as file:
+        with contract_path.open("r", encoding="utf-8") as file:
             contract = yaml.safe_load(file)
 
     except FileNotFoundError as exc:
-        raise FileNotFoundError(f"Contract file: '{contract_name}.yaml' was not found"
-                                ) from exc
+        raise FileNotFoundError(
+            f"Contract '{contract_name}' version "
+            f"'{contract_name}_{contract_version}' was not found"
+        ) from exc
 
     except yaml.YAMLError as exc:
-        raise ValueError(f"Contract file '{contract_name}.yaml' contains invalid YAML"
-                         ) from exc
+        raise ValueError(
+            f"Contract '{contract_name}' version "
+            f"'{contract_name}_{contract_version}' contains invalid YAML"
+        ) from exc
 
     validate_contract(contract)
 
+    if contract["version"] != contract_version:
+        raise ValueError(
+            f"Contract file '{contract_name}/{contract_name}_{contract_version}.yaml' "
+            f"declares version '{contract['version']}', "
+            f"but version '{contract_version}' was requested"
+        )
+
     return contract
+
+
+def list_contracts() -> list[dict]:
+    """Return available, structurally valid contract versions."""
+    if not CONTRACTS_DIR.exists():
+        return []
+
+    contracts = []
+
+    contract_paths = sorted(
+        CONTRACTS_DIR.glob("*/*.yaml")
+    )
+
+    for contract_path in contract_paths:
+        contract_name = contract_path.parent.name
+        filename_stem = contract_path.stem
+
+        # The filename must start with the directory's contract name.
+        expected_prefix = f"{contract_name}_"
+
+        if not filename_stem.startswith(expected_prefix):
+            raise ValueError(
+                f"Contract filename '{contract_path.name}' does not "
+                f"match its directory '{contract_name}'"
+            )
+
+        # Extract only the version portion of the filename.
+        contract_version = filename_stem[len(expected_prefix):]
+
+        if not contract_version:
+            raise ValueError(
+                f"Contract filename '{contract_path.name}' "
+                "does not specify a version"
+            )
+
+        contract = load_contract(
+            contract_name,
+            contract_version,
+        )
+
+        contracts.append({
+            "contract_name": contract_name,
+            "display_name": contract.get(
+                "display_name",
+                contract["name"],
+            ),
+            "version": contract["version"],
+        })
+
+    return contracts
