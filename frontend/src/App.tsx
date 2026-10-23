@@ -399,7 +399,7 @@ function App() {
         </Show>
 
         <Show when="signed-in">
-          <BackendAuthCheck />
+          {/* <BackendAuthCheck /> */}
           <section className="page-intro">
             <p className="eyebrow">DATA QUALITY WORKSPACE</p>
 
