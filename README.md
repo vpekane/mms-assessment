@@ -1,4 +1,4 @@
-# Sentinel — Integration Readiness & Drift Sentinel
+# Sentinel — Integration Readiness
 
 Sentinel is a contract-driven CSV validation service. It checks uploaded datasets against an explicitly selected, versioned YAML contract and reports whether the data satisfies the expected structure, types, and business rules.
 
