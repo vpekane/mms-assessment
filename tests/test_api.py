@@ -1,12 +1,37 @@
 from io import BytesIO
 import yaml
+from types import SimpleNamespace
 import pytest
 from pathlib import Path
 
 from app import create_app
 
-from app.jobs.job_store import get_job
+from app.jobs.job_store import get_job, create_job
 from app.workers.worker import process_next_job
+
+
+@pytest.fixture(autouse=True)
+def mock_clerk_authentication(monkeypatch):
+    """Simulate a successfully authenticated Clerk user in API tests."""
+
+    def fake_authenticate_request(request, options):
+        return SimpleNamespace(
+            is_signed_in=True,
+            reason=None,
+            payload={"sub": "test-user-123"},
+        )
+
+    # Avoid requiring real Clerk credentials in automated tests.
+    monkeypatch.setattr(
+        "app.auth.AuthenticateRequestOptions",
+        lambda **kwargs: None,
+    )
+
+    # Simulate the SDK accepting the user's session.
+    monkeypatch.setattr(
+        "app.auth.authenticate_request",
+        fake_authenticate_request,
+    )
 
 
 @pytest.fixture
@@ -305,6 +330,7 @@ def test_submit_job_creates_queued_job(tmp_path, monkeypatch):
     assert job["status"] == "QUEUED"
     assert job["contract"]["version"] == "1.0"
     assert job["result"] is None
+    assert job["owner_id"] == "test-user-123"
 
     # The worker will need this file after the request finishes.
     assert Path(job["input_path"]).is_file()
@@ -436,3 +462,87 @@ def test_get_contracts_returns_available_versions(
         }
     ]
 
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/me"),
+        ("GET", "/contracts"),
+        ("POST", "/validate"),
+        ("POST", "/detect-drift"),
+        ("POST", "/jobs"),
+        ("GET", "/jobs/unknown-job-id"),
+    ],
+)
+def test_protected_endpoints_reject_unauthenticated_requests(
+    method,
+    path,
+    monkeypatch,
+):
+    def fake_unauthenticated_request(request, options):
+        return SimpleNamespace(
+            is_signed_in=False,
+            reason=SimpleNamespace(
+                name="SESSION_TOKEN_MISSING"
+            ),
+            payload={},
+        )
+
+    monkeypatch.setattr(
+        "app.auth.authenticate_request",
+        fake_unauthenticated_request,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().open(
+        path,
+        method=method,
+    )
+
+    assert response.status_code == 401
+    assert response.json["error"] == "Unauthorized"
+
+
+def test_user_cannot_access_another_users_job(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "sentinel.db"
+
+    monkeypatch.setattr(
+        "app.api.DATABASE_PATH",
+        database_path,
+    )
+
+    # Create a job belonging to the original user.
+    job = create_job(
+        dataset_name="weighbridge",
+        input_path=tmp_path / "unused.csv",
+        contract={"version": "1.0"},
+        db_path=database_path,
+        owner_id="original-user",
+    )
+
+    # Simulate a different, successfully authenticated user.
+    def authenticate_as_another_user(request, options):
+        return SimpleNamespace(
+            is_signed_in=True,
+            reason=None,
+            payload={"sub": "different-user"},
+        )
+
+    monkeypatch.setattr(
+        "app.auth.authenticate_request",
+        authenticate_as_another_user,
+    )
+
+    app = create_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().get(
+        f"/jobs/{job['id']}"
+    )
+
+    assert response.status_code == 404

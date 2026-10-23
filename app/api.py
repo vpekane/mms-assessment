@@ -236,6 +236,7 @@ def submit_job():
             input_path=upload_path,
             contract=contract,
             db_path=DATABASE_PATH,
+            owner_id=g.user_id
         )
 
     except Exception:
@@ -260,6 +261,7 @@ def get_job_status(job_id):
     job = get_job(
         job_id=job_id,
         db_path=DATABASE_PATH,
+        owner_id=g.user_id
     )
 
     if job is None:
